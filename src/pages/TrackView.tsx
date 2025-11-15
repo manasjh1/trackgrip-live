@@ -1,10 +1,11 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, Camera, Layers } from "lucide-react";
+import { MapPin, Camera, Layers, Zap } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 
 const TrackView = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [heatmapIntensity, setHeatmapIntensity] = useState(0.7);
   const [selectedCamera, setSelectedCamera] = useState(1);
 
@@ -15,202 +16,290 @@ const TrackView = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size
-    canvas.width = 800;
-    canvas.height = 600;
+    // Set high resolution for professional look
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Only set dimensions if they haven't been set to avoid flicker
+    if (canvas.width !== rect.width * dpr) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+    }
+    
+    // Logic to get X,Y coordinates at a specific percentage (t) of the track
+    // t goes from 0 to 1
+    const getTrackPoint = (t: number) => {
+        const totalLength = 2100; // Approximate total length of segments
+        const d = t * totalLength;
 
-    // Draw racing track outline (simplified circuit)
+        // Segment 1: Bottom Left Straight (Start) -> length 250
+        if (d < 250) {
+            return { x: 150 + d, y: 450 };
+        }
+        
+        // Segment 2: Left Loop (Turn 1) -> length ~471
+        const d2 = d - 250;
+        if (d2 < 471) {
+            const angle = (Math.PI / 2) - (d2 / 471) * Math.PI; // PI/2 to -PI/2
+            return { 
+                x: 400 + Math.cos(angle) * 150, 
+                y: 300 - Math.sin(angle) * 150 // Canvas Y is inverted
+            };
+        }
+
+        // Segment 3: Top Straight -> length 300
+        const d3 = d2 - 471;
+        if (d3 < 300) {
+            return { x: 400 + d3, y: 150 };
+        }
+
+        // Segment 4: Right Loop (Turn 2/3) -> length ~471
+        const d4 = d3 - 300;
+        if (d4 < 471) {
+            const angle = (-Math.PI / 2) + (d4 / 471) * Math.PI; // -PI/2 to PI/2
+            return {
+                x: 700 + Math.cos(angle) * 150,
+                y: 300 + Math.sin(angle) * 150 
+            };
+        }
+
+        // Segment 5: Bottom Return Straight -> length ~550
+        const d5 = d4 - 471;
+        return { x: 700 - d5, y: 450 };
+    };
+
+    // Color interpolation helper
+    const lerpColor = (color1: number[], color2: number[], factor: number) => {
+        const r = Math.round(color1[0] + (color2[0] - color1[0]) * factor);
+        const g = Math.round(color1[1] + (color2[1] - color1[1]) * factor);
+        const b = Math.round(color1[2] + (color2[2] - color1[2]) * factor);
+        return `rgb(${r},${g},${b})`;
+    };
+
+    // Colors: Red (High), Green (Med), Blue (Low)
+    const colors = {
+        high: [239, 68, 68],   // Red-500
+        med: [34, 197, 94],    // Green-500
+        low: [59, 130, 246]    // Blue-500
+    };
+
+    // Define grip zones (0 to 1 along track)
+    // This defines the "Center" of the color, the code interpolates between them
+    const colorStops = [
+        { t: 0.00, color: colors.high }, // Start Line (High Grip)
+        { t: 0.20, color: colors.med },  // Entering T1 (Braking -> Med)
+        { t: 0.35, color: colors.med },  // Mid Corner (Med)
+        { t: 0.50, color: colors.low },  // Back Straight (Cold tires -> Low)
+        { t: 0.75, color: colors.high }, // Complex (Rubbered in -> High)
+        { t: 1.00, color: colors.high }, // Finish (High)
+    ];
+
+    const getGripColor = (t: number) => {
+        // Find which two stops we are between
+        for (let i = 0; i < colorStops.length - 1; i++) {
+            if (t >= colorStops[i].t && t <= colorStops[i+1].t) {
+                const range = colorStops[i+1].t - colorStops[i].t;
+                const localT = (t - colorStops[i].t) / range;
+                return lerpColor(colorStops[i].color, colorStops[i+1].color, localT);
+            }
+        }
+        return lerpColor(colors.high, colors.high, 0); // Fallback
+    };
+
     const drawTrack = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Clear canvas
+      // Note: We use logic coordinate space 1000x600
+      ctx.clearRect(0, 0, 1000, 600);
 
-      // Track background
-      ctx.fillStyle = 'hsl(220, 15%, 10%)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Draw simplified track shape
-      ctx.strokeStyle = 'hsl(220, 15%, 25%)';
-      ctx.lineWidth = 80;
+      // 1. Draw Dark Asphalt Base (The road itself)
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-
+      ctx.lineWidth = 70; // Base is wider than data line
+      ctx.strokeStyle = '#1a1a1a'; // Dark Asphalt
+      ctx.shadowBlur = 0;
+      
+      // Construct base path
       ctx.beginPath();
-      // Main straight
-      ctx.moveTo(100, 300);
-      ctx.lineTo(300, 300);
-      // Turn 1-2
-      ctx.arc(300, 200, 100, Math.PI/2, -Math.PI/2, true);
-      // Back straight
-      ctx.lineTo(600, 100);
-      // Turn 3-4
-      ctx.arc(600, 200, 100, -Math.PI/2, Math.PI/2, true);
-      // Return to start
-      ctx.lineTo(300, 300);
+      ctx.moveTo(150, 450);
+      ctx.lineTo(400, 450);
+      ctx.arc(400, 300, 150, Math.PI/2, -Math.PI/2, true);
+      ctx.lineTo(700, 150);
+      ctx.arc(700, 300, 150, -Math.PI/2, Math.PI/2, false);
+      ctx.lineTo(150, 450);
       ctx.stroke();
 
-      // Draw grip heatmap overlay
-      drawHeatmap(ctx);
+      // 2. Draw Gradient Grip Data Overlay
+      // We draw this by stepping along the path and changing color
+      ctx.lineWidth = 45;
+      const steps = 400; // Resolution of gradient
+      
+      for (let i = 0; i < steps; i++) {
+          const t = i / steps;
+          const nextT = (i + 1) / steps;
+          
+          const p1 = getTrackPoint(t);
+          const p2 = getTrackPoint(nextT);
+          
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          
+          const col = getGripColor(t);
+          ctx.strokeStyle = col;
+          
+          // Add glow effect to the data line
+          ctx.shadowColor = col;
+          ctx.shadowBlur = 15;
+          
+          ctx.stroke();
+      }
 
-      // Draw corner markers
-      drawCornerMarkers(ctx);
+      // 3. Draw "Live" Car Indicator
+      const time = Date.now() * 0.0002; // Speed factor
+      const loopT = time % 1;
+      const carPos = getTrackPoint(loopT);
+      
+      // Car Dot
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#ffffff';
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(carPos.x, carPos.y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // "LIVE" Label
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("LIVE", carPos.x, carPos.y - 18);
     };
 
-    const drawHeatmap = (ctx: CanvasRenderingContext2D) => {
-      // Simulate grip zones with gradients
-      const zones = [
-        // High grip zone - Turn 1
-        { x: 350, y: 150, radius: 60, color: 'hsl(142, 76%, 45%)' },
-        // Medium grip - Turn 2
-        { x: 400, y: 150, radius: 50, color: 'hsl(45, 100%, 55%)' },
-        // High grip - straight
-        { x: 500, y: 100, radius: 70, color: 'hsl(142, 76%, 45%)' },
-        // Warning zone - Turn 3
-        { x: 600, y: 180, radius: 55, color: 'hsl(25, 95%, 53%)' },
-        // Good grip - Turn 4
-        { x: 550, y: 280, radius: 60, color: 'hsl(142, 76%, 45%)' },
-      ];
-
-      zones.forEach(zone => {
-        const gradient = ctx.createRadialGradient(zone.x, zone.y, 0, zone.x, zone.y, zone.radius);
-        gradient.addColorStop(0, zone.color.replace(')', `, ${heatmapIntensity})`));
-        gradient.addColorStop(1, zone.color.replace(')', ', 0)'));
-        
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    };
-
-    const drawCornerMarkers = (ctx: CanvasRenderingContext2D) => {
-      const corners = [
-        { x: 300, y: 150, label: 'T1' },
-        { x: 400, y: 100, label: 'T2' },
-        { x: 600, y: 100, label: 'T3' },
-        { x: 600, y: 280, label: 'T4' },
-      ];
-
-      ctx.fillStyle = 'hsl(0, 0%, 98%)';
-      ctx.font = 'bold 12px system-ui';
-      ctx.textAlign = 'center';
-
-      corners.forEach(corner => {
-        // Marker dot
-        ctx.beginPath();
-        ctx.arc(corner.x, corner.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Label
-        ctx.fillText(corner.label, corner.x, corner.y - 10);
-      });
-    };
-
-    drawTrack();
-
-    // Animate heatmap
-    const interval = setInterval(() => {
+    // Animation Loop
+    let animationFrameId: number;
+    const render = () => {
       drawTrack();
-    }, 2000);
+      animationFrameId = window.requestAnimationFrame(render);
+    };
+    render();
 
-    return () => clearInterval(interval);
-  }, [heatmapIntensity]);
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, []);
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Track View</h1>
-            <p className="text-muted-foreground">Live grip heatmap overlay</p>
+    <div className="min-h-screen p-6 space-y-6">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <h2 className="text-xs font-bold text-red-500 uppercase tracking-widest">Live Session</h2>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2">
-              <Layers className="w-4 h-4" />
-              Layers
-            </Button>
-            <Button variant="outline" size="sm" className="gap-2">
-              <MapPin className="w-4 h-4" />
-              Zoom to Turn
-            </Button>
-          </div>
+          <h1 className="text-3xl font-bold text-foreground">Track View</h1>
         </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-2 bg-card/50 backdrop-blur-sm border-white/10 hover:bg-white/5">
+            <Layers className="w-4 h-4" />
+            Layers
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2 bg-card/50 backdrop-blur-sm border-white/10 hover:bg-white/5">
+            <MapPin className="w-4 h-4" />
+            Zoom to Sector
+          </Button>
+        </div>
+      </div>
 
-        {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Track Canvas */}
-          <Card className="lg:col-span-3 p-6 bg-card border-border">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-foreground">Circuit Layout</h2>
-              <div className="flex items-center gap-4">
-                <label className="text-sm text-muted-foreground">Heatmap Intensity</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.1" 
-                  value={heatmapIntensity}
-                  onChange={(e) => setHeatmapIntensity(parseFloat(e.target.value))}
-                  className="w-32"
-                />
-              </div>
+      {/* Main Grid */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Track Canvas Card */}
+        <Card className="lg:col-span-3 p-6 bg-card/40 backdrop-blur-xl border-white/10 relative overflow-hidden">
+          
+          {/* Header inside Card */}
+          <div className="flex items-center justify-between mb-6 relative z-10">
+            <div>
+                <h2 className="text-lg font-semibold text-foreground">Grip Heatmap</h2>
+                <p className="text-xs text-muted-foreground">Real-time surface friction coefficient</p>
             </div>
-            <div className="rounded-lg overflow-hidden border border-border">
-              <canvas 
-                ref={canvasRef}
-                className="w-full h-auto"
-                style={{ maxHeight: '600px' }}
-              />
+            <div className="flex items-center gap-6 text-xs font-medium">
+                 <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_10px_red]" />
+                    <span className="text-foreground">High Grip (1.2μ)</span>
+                 </div>
+                 <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_lime]" />
+                    <span className="text-foreground">Medium (0.9μ)</span>
+                 </div>
+                 <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_blue]" />
+                    <span className="text-foreground">Low (0.6μ)</span>
+                 </div>
             </div>
-            
-            {/* Legend */}
-            <div className="mt-4 flex items-center justify-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-grip-high" />
-                <span className="text-sm text-muted-foreground">High Grip</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-grip-medium" />
-                <span className="text-sm text-muted-foreground">Medium</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-grip-low" />
-                <span className="text-sm text-muted-foreground">Low Grip</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-grip-danger" />
-                <span className="text-sm text-muted-foreground">Danger</span>
-              </div>
-            </div>
-          </Card>
+          </div>
+          
+          {/* Canvas Container */}
+          <div className="relative w-full h-[500px] bg-black/40 rounded-xl border border-white/5 overflow-hidden flex items-center justify-center">
+            {/* Subtle Grid Background */}
+            <div className="absolute inset-0 opacity-20" 
+                 style={{ 
+                    backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                    backgroundSize: '40px 40px'
+                 }} 
+            />
+            <canvas 
+              ref={canvasRef}
+              className="w-full h-full relative z-10"
+              style={{ maxWidth: '100%', objectFit: 'contain' }}
+            />
+          </div>
+        </Card>
 
-          {/* Camera Controls */}
-          <Card className="p-6 bg-card border-border">
-            <h2 className="text-xl font-bold text-foreground mb-4">Camera Feeds</h2>
-            <div className="space-y-2">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((cam) => (
-                <Button
-                  key={cam}
-                  variant={selectedCamera === cam ? "default" : "outline"}
-                  size="sm"
-                  className="w-full justify-start gap-2"
-                  onClick={() => setSelectedCamera(cam)}
-                >
-                  <Camera className="w-4 h-4" />
-                  Camera {cam} - {cam <= 2 ? 'Turn 1' : cam <= 4 ? 'Turn 2-3' : 'Turn 4-5'}
-                </Button>
-              ))}
-            </div>
+        {/* Camera Feed Sidebar */}
+        <div className="space-y-6">
+            {/* Active Camera Feed */}
+            <Card className="p-4 bg-card/40 backdrop-blur-xl border-white/10 overflow-hidden">
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                        <Camera className="w-4 h-4" />
+                        <span>CAM {selectedCamera} FEED</span>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                </div>
+                <div className="aspect-video bg-black/60 rounded-lg border border-white/5 relative flex items-center justify-center group">
+                     <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1568605114967-8130f3a36994?q=80&w=1000&auto=format&fit=crop')] bg-cover bg-center opacity-40 group-hover:opacity-60 transition-opacity" />
+                     <p className="relative z-10 text-xs text-white/70 font-mono">SIGNAL: STRONG (-42dBm)</p>
+                     
+                     {/* Camera Overlay UI */}
+                     <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/50 text-[10px] font-mono text-white rounded border border-white/10">REC</div>
+                     <div className="absolute bottom-2 right-2 text-[10px] font-mono text-white/80">4K • 60FPS</div>
+                </div>
+            </Card>
 
-            <div className="mt-6 p-4 rounded-lg bg-muted/50 space-y-2">
-              <h3 className="text-sm font-medium text-foreground">Camera {selectedCamera}</h3>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <p>Status: <span className="text-success">Active</span></p>
-                <p>FPS: 60</p>
-                <p>Latency: 1.1s</p>
-                <p>Resolution: 1920x1080</p>
-              </div>
-            </div>
-          </Card>
+            {/* Camera List */}
+            <Card className="bg-card/40 backdrop-blur-xl border-white/10 flex flex-col max-h-[400px]">
+                <div className="p-4 border-b border-white/5">
+                    <h3 className="font-semibold text-sm">Available Feeds</h3>
+                </div>
+                <div className="overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((cam) => (
+                    <button
+                        key={cam}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg text-sm transition-all duration-200 ${
+                        selectedCamera === cam 
+                            ? "bg-primary/10 border border-primary/20 text-primary" 
+                            : "hover:bg-white/5 border border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => setSelectedCamera(cam)}
+                    >
+                        <div className="flex items-center gap-3">
+                            <span className="font-mono text-xs opacity-50">0{cam}</span>
+                            <span>Turn {cam} Apex</span>
+                        </div>
+                        {selectedCamera === cam && <Zap className="w-3 h-3" />}
+                    </button>
+                    ))}
+                </div>
+            </Card>
         </div>
       </div>
     </div>

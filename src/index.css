@@ -2,66 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    /* Racing dark theme */
-    --background: 220 15% 8%;
+    /* Deep Space Dark Theme */
+    --background: 240 10% 4%;
     --foreground: 0 0% 98%;
 
-    --card: 220 15% 12%;
+    /* Glass Card Variables */
+    --card: 240 10% 4%; 
     --card-foreground: 0 0% 98%;
-
-    --popover: 220 15% 10%;
+    
+    --popover: 240 10% 4%;
     --popover-foreground: 0 0% 98%;
 
-    /* Racing red for alerts and danger */
-    --primary: 0 85% 55%;
-    --primary-foreground: 0 0% 100%;
+    /* Neon Accents */
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
 
-    /* Tech blue for secondary UI */
-    --secondary: 210 100% 50%;
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 220 15% 18%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
 
-    /* Tech accent color */
-    --accent: 195 100% 50%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 190 95% 50%;
+    --accent-foreground: 222 47% 11%;
 
-    /* Danger/alert red */
-    --destructive: 0 85% 55%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
 
-    /* Safety green for good grip */
-    --success: 142 76% 45%;
-    --success-foreground: 0 0% 100%;
+    --success: 142 70% 50%;
+    --warning: 45 93% 47%;
+    
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 217 91% 60%;
 
-    /* Warning yellow */
-    --warning: 45 100% 55%;
-    --warning-foreground: 220 15% 8%;
-
-    --border: 220 15% 20%;
-    --input: 220 15% 18%;
-    --ring: 0 85% 55%;
-
-    --radius: 0.5rem;
-
-    /* Grip level colors */
-    --grip-high: 142 76% 45%;
-    --grip-medium: 45 100% 55%;
-    --grip-low: 25 95% 53%;
-    --grip-danger: 0 85% 55%;
-
-    /* Glow effects */
-    --glow-primary: 0 85% 55% / 0.3;
-    --glow-success: 142 76% 45% / 0.3;
-    --glow-warning: 45 100% 55% / 0.3;
-    --glow-accent: 195 100% 50% / 0.3;
+    --radius: 0.75rem;
+    
+    /* Grip Colors */
+    --grip-high: 142 70% 50%;
+    --grip-medium: 45 93% 47%;
+    --grip-low: 346 87% 55%;
+    --grip-danger: 0 84% 60%;
   }
 }
 
@@ -69,8 +52,27 @@ All colors MUST be HSL.
   * {
     @apply border-border;
   }
-
+  
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    /* Moving Grid Background + Vignette */
+    background-color: hsl(240, 10%, 4%);
+    background-image: 
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, hsla(217,91%,60%,0.05) 0px, transparent 50%);
+    background-size: 40px 40px, 40px 40px, 100% 100%;
+    background-attachment: fixed;
+    min-height: 100vh;
   }
+}
+
+/* Animation for the "Live" Alert Ring */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
 }
