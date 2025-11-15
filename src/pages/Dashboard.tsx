@@ -1,15 +1,29 @@
 import { Card } from "@/components/ui/card";
-import { Activity, AlertTriangle, Camera, MapPin, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Camera, MapPin, Zap, CloudRain, Sun, Thermometer, Droplets, Wind } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const Dashboard = () => {
     const [activeAlerts, setActiveAlerts] = useState(0);
     const [activeCameras, setActiveCameras] = useState(8);
+    // Simulated weather state
+    const [weather, setWeather] = useState({
+        condition: 'Dry', // Dry, Damp, Wet
+        airTemp: 24,
+        trackTemp: 38,
+        humidity: 45
+    });
   
     useEffect(() => {
       const interval = setInterval(() => {
         setActiveAlerts(Math.floor(Math.random() * 3));
         setActiveCameras(7 + Math.floor(Math.random() * 2));
+        
+        // Simulate changing weather/track conditions slightly
+        setWeather(prev => ({
+            ...prev,
+            trackTemp: prev.trackTemp + (Math.random() * 0.4 - 0.2),
+            humidity: Math.min(100, Math.max(0, prev.humidity + (Math.random() * 2 - 1)))
+        }));
       }, 5000);
       return () => clearInterval(interval);
     }, []);
@@ -23,11 +37,32 @@ const Dashboard = () => {
                         <h2 className="text-sm font-medium text-primary mb-1 uppercase tracking-wider">Mission Control</h2>
                         <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Overview</h1>
                      </div>
-                     <div className="flex gap-2">
-                        <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium border border-emerald-500/20 flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            System Normal
-                        </span>
+                     <div className="flex items-center gap-4">
+                        {/* NEW: Weather Widget for Dashboard */}
+                        <div className="hidden md:flex items-center gap-4 px-4 py-2 rounded-full bg-card/50 backdrop-blur-md border border-white/10">
+                            <div className="flex items-center gap-2 pr-4 border-r border-white/10">
+                                {weather.condition === 'Wet' ? (
+                                    <CloudRain className="w-4 h-4 text-blue-400 animate-bounce" />
+                                ) : (
+                                    <Sun className="w-4 h-4 text-amber-400 animate-pulse" />
+                                )}
+                                <span className={`text-sm font-bold ${weather.condition === 'Wet' ? 'text-blue-400' : 'text-amber-400'}`}>
+                                    {weather.condition.toUpperCase()} TRACK
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs font-mono text-muted-foreground">
+                                <span className="flex items-center gap-1"><Thermometer className="w-3 h-3" /> {weather.airTemp.toFixed(1)}°C Air</span>
+                                <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-red-500" /> {weather.trackTemp.toFixed(1)}°C Track</span>
+                                <span className="flex items-center gap-1"><Droplets className="w-3 h-3" /> {weather.humidity.toFixed(0)}%</span>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium border border-emerald-500/20 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                System Normal
+                            </span>
+                        </div>
                      </div>
                 </div>
 
@@ -48,13 +83,15 @@ const Dashboard = () => {
                         color="text-emerald-400"
                         bg="bg-emerald-500/10"
                      />
+                     {/* Replaced Latency with Environmental Info since it's relevant to grip */}
                      <StatsCard 
-                        title="System Latency" 
-                        value="42ms" 
-                        icon={Zap} 
-                        trend="-12% vs avg" 
-                        color="text-yellow-400"
-                        bg="bg-yellow-500/10"
+                        title="Track Condition" 
+                        value={weather.condition} 
+                        icon={weather.condition === 'Wet' ? CloudRain : Sun}
+                        trend={`${weather.trackTemp.toFixed(1)}°C Surf.`} 
+                        color={weather.condition === 'Wet' ? "text-blue-400" : "text-amber-400"}
+                        bg={weather.condition === 'Wet' ? "bg-blue-500/10" : "bg-amber-500/10"}
+                        alert={weather.condition === 'Wet'} // Highlight if wet
                      />
                      <StatsCard 
                         title="Active Alerts" 
@@ -79,12 +116,17 @@ const Dashboard = () => {
                             </div>
                         </div>
                         {/* Placeholder for heatmap visual */}
-                        <div className="w-full h-64 rounded-lg bg-gradient-to-r from-emerald-500/10 via-amber-500/10 to-rose-500/10 border border-white/5 relative overflow-hidden">
-                             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
+                        <div className="w-full h-64 rounded-lg bg-gradient-to-r from-emerald-500/10 via-amber-500/10 to-rose-500/10 border border-white/5 relative overflow-hidden group">
+                             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm z-10">
                                 <Activity className="w-4 h-4 mr-2 opacity-50" /> Live Track Map Rendering...
                              </div>
                              {/* Scanline effect */}
                              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-primary/5 to-transparent animate-[scan_2s_linear_infinite] h-full w-full" />
+                             
+                             {/* Wet weather overlay effect if needed */}
+                             {weather.condition === 'Wet' && (
+                                <div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/8/82/Rain_drops_on_window_02.jpg')] bg-cover opacity-10 mix-blend-overlay pointer-events-none" />
+                             )}
                         </div>
                         
                         <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
