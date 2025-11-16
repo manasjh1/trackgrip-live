@@ -1,75 +1,123 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, Camera, Layers, Zap } from "lucide-react";
+import { MapPin, Camera, Layers, Zap, Upload, X, Loader2, AlertTriangle } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+
+// Types for Backend API Response - UPDATED to match actual backend
+interface AnalysisStatistics {
+  total_patches_analyzed: number;
+  dangerous_area_percentage: string;  // String like "14.9%"
+  max_danger_score: string;          // String like "0.674"
+  safety_status: string;             // "SAFE" or "CAUTION"
+}
+
+interface AnalysisResponse {
+  status: string;
+  image_id?: string;
+  timestamp: string;
+  image_size: [number, number];
+  heatmap_base64: string;
+  heatmap_file_path?: string;
+  heatmap_url?: string;
+  statistics: AnalysisStatistics;    // Changed from 'summary' to 'statistics'
+  model_info: {
+    accuracy: string;
+    algorithm: string;
+  };
+}
 
 const TrackView = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [heatmapIntensity, setHeatmapIntensity] = useState(0.7);
   const [selectedCamera, setSelectedCamera] = useState(1);
 
+  // Analysis State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
+
+  // Handle Image Upload and API Call
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      await analyzeImage(file);
+    }
+  };
+
+  const analyzeImage = async (file: File) => {
+    setIsAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('camera_id', `CAM_${selectedCamera}`);
+
+      // Connect to the backend API
+      const response = await fetch('http://localhost:8000/analyze-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Analysis failed');
+
+      const data: AnalysisResponse = await response.json();
+      console.log("Analysis complete. Received Base64 length:", data.heatmap_base64?.length);
+      console.log("Full response:", data);  // Debug log
+      setAnalysisResult(data);
+    } catch (error) {
+      console.error("Error analyzing image:", error);
+      // In a real app, you would use the toast component here
+      alert("Failed to connect to backend. Is the python server running on port 8000?");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const clearAnalysis = () => {
+    setAnalysisResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Effect to draw the simulated track canvas (only when NOT analyzing)
   useEffect(() => {
+    if (analysisResult) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set high resolution for professional look
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     
-    // Only set dimensions if they haven't been set to avoid flicker
     if (canvas.width !== rect.width * dpr) {
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         ctx.scale(dpr, dpr);
     }
     
-    // Logic to get X,Y coordinates at a specific percentage (t) of the track
-    // t goes from 0 to 1
     const getTrackPoint = (t: number) => {
-        const totalLength = 2100; // Approximate total length of segments
+        const totalLength = 2100; 
         const d = t * totalLength;
 
-        // Segment 1: Bottom Left Straight (Start) -> length 250
-        if (d < 250) {
-            return { x: 150 + d, y: 450 };
-        }
-        
-        // Segment 2: Left Loop (Turn 1) -> length ~471
+        if (d < 250) return { x: 150 + d, y: 450 };
         const d2 = d - 250;
         if (d2 < 471) {
-            const angle = (Math.PI / 2) - (d2 / 471) * Math.PI; // PI/2 to -PI/2
-            return { 
-                x: 400 + Math.cos(angle) * 150, 
-                y: 300 - Math.sin(angle) * 150 // Canvas Y is inverted
-            };
+            const angle = (Math.PI / 2) - (d2 / 471) * Math.PI; 
+            return { x: 400 + Math.cos(angle) * 150, y: 300 - Math.sin(angle) * 150 };
         }
-
-        // Segment 3: Top Straight -> length 300
         const d3 = d2 - 471;
-        if (d3 < 300) {
-            return { x: 400 + d3, y: 150 };
-        }
-
-        // Segment 4: Right Loop (Turn 2/3) -> length ~471
+        if (d3 < 300) return { x: 400 + d3, y: 150 };
         const d4 = d3 - 300;
         if (d4 < 471) {
-            const angle = (-Math.PI / 2) + (d4 / 471) * Math.PI; // -PI/2 to PI/2
-            return {
-                x: 700 + Math.cos(angle) * 150,
-                y: 300 + Math.sin(angle) * 150 
-            };
+            const angle = (-Math.PI / 2) + (d4 / 471) * Math.PI; 
+            return { x: 700 + Math.cos(angle) * 150, y: 300 + Math.sin(angle) * 150 };
         }
-
-        // Segment 5: Bottom Return Straight -> length ~550
         const d5 = d4 - 471;
         return { x: 700 - d5, y: 450 };
     };
 
-    // Color interpolation helper
     const lerpColor = (color1: number[], color2: number[], factor: number) => {
         const r = Math.round(color1[0] + (color2[0] - color1[0]) * factor);
         const g = Math.round(color1[1] + (color2[1] - color1[1]) * factor);
@@ -77,26 +125,17 @@ const TrackView = () => {
         return `rgb(${r},${g},${b})`;
     };
 
-    // Colors: Red (High), Green (Med), Blue (Low)
     const colors = {
-        high: [239, 68, 68],   // Red-500
-        med: [34, 197, 94],    // Green-500
-        low: [59, 130, 246]    // Blue-500
+        high: [239, 68, 68], med: [34, 197, 94], low: [59, 130, 246]
     };
 
-    // Define grip zones (0 to 1 along track)
-    // This defines the "Center" of the color, the code interpolates between them
     const colorStops = [
-        { t: 0.00, color: colors.high }, // Start Line (High Grip)
-        { t: 0.20, color: colors.med },  // Entering T1 (Braking -> Med)
-        { t: 0.35, color: colors.med },  // Mid Corner (Med)
-        { t: 0.50, color: colors.low },  // Back Straight (Cold tires -> Low)
-        { t: 0.75, color: colors.high }, // Complex (Rubbered in -> High)
-        { t: 1.00, color: colors.high }, // Finish (High)
+        { t: 0.00, color: colors.high }, { t: 0.20, color: colors.med },
+        { t: 0.35, color: colors.med }, { t: 0.50, color: colors.low },
+        { t: 0.75, color: colors.high }, { t: 1.00, color: colors.high },
     ];
 
     const getGripColor = (t: number) => {
-        // Find which two stops we are between
         for (let i = 0; i < colorStops.length - 1; i++) {
             if (t >= colorStops[i].t && t <= colorStops[i+1].t) {
                 const range = colorStops[i+1].t - colorStops[i].t;
@@ -104,22 +143,18 @@ const TrackView = () => {
                 return lerpColor(colorStops[i].color, colorStops[i+1].color, localT);
             }
         }
-        return lerpColor(colors.high, colors.high, 0); // Fallback
+        return lerpColor(colors.high, colors.high, 0); 
     };
 
     const drawTrack = () => {
-      // Clear canvas
-      // Note: We use logic coordinate space 1000x600
       ctx.clearRect(0, 0, 1000, 600);
 
-      // 1. Draw Dark Asphalt Base (The road itself)
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 70; // Base is wider than data line
-      ctx.strokeStyle = '#1a1a1a'; // Dark Asphalt
+      ctx.lineWidth = 70; 
+      ctx.strokeStyle = '#1a1a1a'; 
       ctx.shadowBlur = 0;
       
-      // Construct base path
       ctx.beginPath();
       ctx.moveTo(150, 450);
       ctx.lineTo(400, 450);
@@ -129,15 +164,12 @@ const TrackView = () => {
       ctx.lineTo(150, 450);
       ctx.stroke();
 
-      // 2. Draw Gradient Grip Data Overlay
-      // We draw this by stepping along the path and changing color
       ctx.lineWidth = 45;
-      const steps = 400; // Resolution of gradient
+      const steps = 400; 
       
       for (let i = 0; i < steps; i++) {
           const t = i / steps;
           const nextT = (i + 1) / steps;
-          
           const p1 = getTrackPoint(t);
           const p2 = getTrackPoint(nextT);
           
@@ -147,20 +179,15 @@ const TrackView = () => {
           
           const col = getGripColor(t);
           ctx.strokeStyle = col;
-          
-          // Add glow effect to the data line
           ctx.shadowColor = col;
           ctx.shadowBlur = 15;
-          
           ctx.stroke();
       }
 
-      // 3. Draw "Live" Car Indicator
-      const time = Date.now() * 0.0002; // Speed factor
+      const time = Date.now() * 0.0002; 
       const loopT = time % 1;
       const carPos = getTrackPoint(loopT);
       
-      // Car Dot
       ctx.shadowBlur = 20;
       ctx.shadowColor = '#ffffff';
       ctx.fillStyle = '#ffffff';
@@ -168,7 +195,6 @@ const TrackView = () => {
       ctx.arc(carPos.x, carPos.y, 8, 0, Math.PI * 2);
       ctx.fill();
       
-      // "LIVE" Label
       ctx.shadowBlur = 0;
       ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
       ctx.font = "bold 10px sans-serif";
@@ -176,7 +202,6 @@ const TrackView = () => {
       ctx.fillText("LIVE", carPos.x, carPos.y - 18);
     };
 
-    // Animation Loop
     let animationFrameId: number;
     const render = () => {
       drawTrack();
@@ -185,7 +210,7 @@ const TrackView = () => {
     render();
 
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, []);
+  }, [analysisResult]);
 
   return (
     <div className="min-h-screen p-6 space-y-6">
@@ -193,64 +218,157 @@ const TrackView = () => {
       <div className="max-w-7xl mx-auto flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <h2 className="text-xs font-bold text-red-500 uppercase tracking-widest">Live Session</h2>
+            {analysisResult ? (
+                <>
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <h2 className="text-xs font-bold text-blue-500 uppercase tracking-widest">Analysis Mode</h2>
+                </>
+            ) : (
+                <>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <h2 className="text-xs font-bold text-red-500 uppercase tracking-widest">Live Session</h2>
+                </>
+            )}
           </div>
           <h1 className="text-3xl font-bold text-foreground">Track View</h1>
         </div>
         <div className="flex gap-2">
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            className="hidden" 
+            accept="image/*"
+            onChange={handleFileSelect}
+          />
+          
+          {analysisResult ? (
+             <Button 
+                variant="destructive" 
+                size="sm" 
+                className="gap-2"
+                onClick={clearAnalysis}
+             >
+                <X className="w-4 h-4" />
+                Close Analysis
+             </Button>
+          ) : (
+            <Button 
+                variant="default" 
+                size="sm" 
+                className="gap-2 bg-primary hover:bg-primary/90"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isAnalyzing}
+            >
+                {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {isAnalyzing ? "Analyzing..." : "Analyze Image"}
+            </Button>
+          )}
+          
           <Button variant="outline" size="sm" className="gap-2 bg-card/50 backdrop-blur-sm border-white/10 hover:bg-white/5">
             <Layers className="w-4 h-4" />
             Layers
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2 bg-card/50 backdrop-blur-sm border-white/10 hover:bg-white/5">
-            <MapPin className="w-4 h-4" />
-            Zoom to Sector
           </Button>
         </div>
       </div>
 
       {/* Main Grid */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Track Canvas Card */}
+        {/* Track Canvas/Image Card */}
         <Card className="lg:col-span-3 p-6 bg-card/40 backdrop-blur-xl border-white/10 relative overflow-hidden">
           
-          {/* Header inside Card */}
+          {/* Header inside Card - Changes based on state */}
           <div className="flex items-center justify-between mb-6 relative z-10">
             <div>
                 <h2 className="text-lg font-semibold text-foreground">Grip Heatmap</h2>
-                <p className="text-xs text-muted-foreground">Real-time surface friction coefficient</p>
+                <p className="text-xs text-muted-foreground">
+                    {analysisResult 
+                        ? `Processed: ${new Date(analysisResult.timestamp).toLocaleTimeString()}`
+                        : "Real-time surface friction coefficient"
+                    }
+                </p>
             </div>
+            
+            {/* Dynamic Stats Legend - FIXED */}
             <div className="flex items-center gap-6 text-xs font-medium">
-                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_10px_red]" />
-                    <span className="text-foreground">High Grip (1.2μ)</span>
-                 </div>
-                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_lime]" />
-                    <span className="text-foreground">Medium (0.9μ)</span>
-                 </div>
-                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_blue]" />
-                    <span className="text-foreground">Low (0.6μ)</span>
-                 </div>
+                {analysisResult ? (
+                    <>
+                         <div className="flex items-center gap-2">
+                            <AlertTriangle className="w-3 h-3 text-red-500" />
+                            <span className="text-foreground">Max Danger: {analysisResult.statistics.max_danger_score}</span>
+                         </div>
+                         <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-foreground">Low Grip: {analysisResult.statistics.dangerous_area_percentage}</span>
+                         </div>
+                         <div className="flex items-center gap-2">
+                            <Layers className="w-3 h-3 text-muted-foreground" />
+                            <span className="text-foreground">Patches: {analysisResult.statistics.total_patches_analyzed}</span>
+                         </div>
+                         <div className="flex items-center gap-2">
+                            <span className="text-xs px-2 py-1 rounded-full bg-primary/20 text-primary">
+                                {analysisResult.statistics.safety_status}
+                            </span>
+                         </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_10px_red]" />
+                            <span className="text-foreground">High Grip (1.2μ)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_lime]" />
+                            <span className="text-foreground">Medium (0.9μ)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_blue]" />
+                            <span className="text-foreground">Low (0.6μ)</span>
+                        </div>
+                    </>
+                )}
             </div>
           </div>
           
-          {/* Canvas Container */}
+          {/* View Container */}
           <div className="relative w-full h-[500px] bg-black/40 rounded-xl border border-white/5 overflow-hidden flex items-center justify-center">
-            {/* Subtle Grid Background */}
-            <div className="absolute inset-0 opacity-20" 
-                 style={{ 
-                    backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                    backgroundSize: '40px 40px'
-                 }} 
-            />
-            <canvas 
-              ref={canvasRef}
-              className="w-full h-full relative z-10"
-              style={{ maxWidth: '100%', objectFit: 'contain' }}
-            />
+            {/* Loading Overlay */}
+            {isAnalyzing && (
+                <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="w-10 h-10 text-primary animate-spin mb-2" />
+                    <span className="text-sm font-medium text-white">Processing Friction Data...</span>
+                </div>
+            )}
+
+            {/* Content Switcher: Canvas or Analysis Image */}
+            {analysisResult ? (
+                 <div className="w-full h-full flex items-center justify-center bg-black">
+                    {/* Display the heatmap using Base64 */}
+                    <img 
+                        src={`data:image/jpeg;base64,${analysisResult.heatmap_base64}`} 
+                        alt="Friction Analysis Heatmap" 
+                        className="max-w-full max-h-full object-contain"
+                        onError={(e) => {
+                            console.error("Image failed to load", e);
+                            alert("Failed to load heatmap image");
+                        }}
+                    />
+                 </div>
+            ) : (
+                <>
+                    {/* Subtle Grid Background for Canvas */}
+                    <div className="absolute inset-0 opacity-20" 
+                        style={{ 
+                            backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                            backgroundSize: '40px 40px'
+                        }} 
+                    />
+                    <canvas 
+                    ref={canvasRef}
+                    className="w-full h-full relative z-10"
+                    style={{ maxWidth: '100%', objectFit: 'contain' }}
+                    />
+                </>
+            )}
           </div>
         </Card>
 
